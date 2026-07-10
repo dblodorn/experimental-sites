@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>🌀 Chaos10</title>
+  <meta name="description" content="10 chaotic elements. Click to add more chaos.">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0d0d0d; }
+    canvas { display: block; }
+    #ui {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      color: #aaa; font-size: 13px; text-align: center; pointer-events: none;
+      font-family: 'Helvetica Neue', sans-serif; z-index: 10;
+      background: rgba(0,0,0,.6); padding: 8px 24px; border-radius: 30px;
+      border: 1px solid rgba(255,255,255,.08);
+      letter-spacing: 1px; text-transform: uppercase;
+    }
+    #ui span { color: #ff6b6b; }
+    #count { color: #ffd93d; }
+  </style>
+</head>
+<body>
+  <div id="ui">🌀 <span>chaos10</span> · click to spawn · <span id="count">0</span> elements</div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Body, Events, Composite, Common } = Matter;
+
+    const engine = Engine.create();
+    const w = window.innerWidth, h = window.innerHeight;
+    const render = Render.create({
+      element: document.body, engine,
+      options: {
+        width: w, height: h,
+        background: '#0d0d0d', wireframes: false,
+        pixelRatio: window.devicePixelRatio, hasBounds: true
+      }
+    });
+
+    // Synths — 10 different voices!
+    const reverb = new Tone.Reverb({ decay: 15, wet: 0.4 }).toDestination();
+
+    const voices = [
+      new Tone.MonoSynth({ oscillator: { type: 'sine' }, envelope: { attack: 0.001, decay: 0.3, sustain: 0.1, release: 0.5 } }),
+      new Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.001, decay: 0.4, sustain: 0.2, release: 0.6 } }),
+      new Tone.FMSynth({ harmonicity: 3, modulationIndex: 5 }),
+      new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.3, release: 0.2 }, harmonicity: 6, resonance: 800 }),
+      new Tone.MonoSynth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.3 } }),
+      new Tone.Synth({ oscillator: { type: 'sawtooth' }, envelope: { attack: 0.001, decay: 0.5, sustain: 0.1, release: 0.4 } }),
+      new Tone.FMSynth({ harmonicity: 0.5, modulationIndex: 10 }),
+      new Tone.MonoSynth({ oscillator: { type: 'pulse' }, envelope: { attack: 0.01, decay: 0.2, release: 0.8 } }),
+      new Tone.PluckSynth({ envelope: { attack: 0.001, decay: 0.3, release: 0.5 } }),
+      new Tone.MetalSynth({ envelope: { attack: 0.01, decay: 0.8, release: 1 }, harmonicity: 3, resonance: 4000, octaves: 3 }),
+    ];
+
+    voices.forEach(v => v.connect(reverb));
+
+    const pentatonic = ['C3','D3','E3','G3','A3','C4','D4','E4','G4','A4'];
+    const colors = ['#ff6b6b','#ffd93d','#6bcb77','#4d96ff','#ff6b9d','#845ec2','#00c9a7','#ff9671','#ffc75f','#f9f871'];
+
+    let elements = [];
+    let voiceIdx = 0;
+    const countEl = document.getElementById('count');
+
+    function createChaosElement(x, y) {
+      const type = Math.floor(Math.random() * 4);
+      const size = Math.random() * 20 + 15;
+      const color = colors[voiceIdx % colors.length];
+      let body;
+
+      switch(type) {
+        case 0: // Circle
+          body = Bodies.circle(x || Math.random()*w*0.6 + w*0.2, y || -30, size, {
+            restitution: 0.6 + Math.random()*0.3, friction: 0.05,
+            render: { fillStyle: color, strokeStyle: 'rgba(255,255,255,0.3)', lineWidth: 1 },
+            label: 'element' + voiceIdx
+          });
+          break;
+        case 1: // Rectangle
+          body = Bodies.rectangle(x || Math.random()*w*0.6 + w*0.2, y || -50, size*2, size, {
+            restitution: 0.4 + Math.random()*0.3, friction: 0.1, density: 0.003,
+            render: { fillStyle: color, strokeStyle: 'rgba(255,255,255,0.3)', lineWidth: 1 },
+            label: 'element' + voiceIdx, angle: Math.random() * Math.PI * 2
+          });
+          break;
+        case 2: // Triangle (polygon)
+          body = Bodies.polygon(x || Math.random()*w*0.6 + w*0.2, y || -40, 3, size, {
+            restitution: 0.5, friction: 0.08,
+            render: { fillStyle: color, strokeStyle: 'rgba(255,255,255,0.3)', lineWidth: 1 },
+            label: 'element' + voiceIdx
+          });
+          break;
+        case 3: // Pentagon
+          body = Bodies.polygon(x || Math.random()*w*0.6 + w*0.2, y || -40, 5, size * 0.8, {
+            restitution: 0.5, friction: 0.05,
+            render: { fillStyle: color, strokeStyle: 'rgba(255,255,255,0.3)', lineWidth: 1 },
+            label: 'element' + voiceIdx
+          });
+          break;
+      }
+
+      if (body) {
+        elements.push({ body, voice: voiceIdx });
+        voiceIdx = (voiceIdx + 1) % 10;
+        Composite.add(engine.world, body);
+        countEl.textContent = elements.length;
+      }
+    }
+
+    // Collision -> play voice
+    Events.on(engine, 'collisionStart', (e) => {
+      e.pairs.forEach(pair => {
+        const a = pair.bodyA, b = pair.bodyB;
+        const eA = elements.find(el => el.body === a);
+        const eB = elements.find(el => el.body === b);
+        if (eA && eB) {
+          const speed = Math.sqrt(
+            (a.velocity.x - b.velocity.x)**2 + (a.velocity.y - b.velocity.y)**2
+          );
+          const vel = Math.min(1, speed / 30);
+          if (vel > 0.02) {
+            const note = pentatonic[eA.voice];
+            const note2 = pentatonic[eB.voice];
+            voices[eA.voice].triggerAttackRelease(note, 0.15 + vel * 0.2, undefined, vel * 0.5);
+            voices[eB.voice].triggerAttackRelease(note2, 0.15 + vel * 0.2, undefined, vel * 0.5);
+          }
+        }
+      });
+    });
+
+    // Walls
+    const wallOpts = { isStatic: true, render: { fillStyle: '#1a1a1a' } };
+    Composite.add(engine.world, [
+      Bodies.rectangle(w/2, -25, w, 50, wallOpts),
+      Bodies.rectangle(w/2, h+25, w, 50, wallOpts),
+      Bodies.rectangle(-25, h/2, 50, h, wallOpts),
+      Bodies.rectangle(w+25, h/2, 50, h, wallOpts),
+    ]);
+
+    // Spawn initial chaos
+    for (let i = 0; i < 10; i++) setTimeout(createChaosElement, i * 150);
+
+    // Click to add more
+    render.canvas.addEventListener('click', (e) => {
+      for (let i = 0; i < 3; i++) setTimeout(() => createChaosElement(e.clientX + (Math.random()-0.5)*60, e.clientY), i * 100);
+    });
+
+    // Space = rain of chaos
+    document.body.onkeyup = (e) => {
+      if (e.key === ' ' || e.code === 'Space') {
+        for (let i = 0; i < 5; i++) setTimeout(createChaosElement, i * 120);
+      }
+    };
+
+    Runner.run(Runner.create(), engine);
+    Render.run(render);
+
+    // Window resize
+    window.addEventListener('resize', () => {
+      render.canvas.width = window.innerWidth;
+      render.canvas.height = window.innerHeight;
+    });
+  </script>
+</body>
+</html>

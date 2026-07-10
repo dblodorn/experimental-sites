@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>119 Paintings</title>
+  <meta name="description" content="119 colored canvases. Touch them. They sing.">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a1a; font-family: 'Courier New', monospace; }
+    canvas { display: block; }
+    #ui {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      color: #777; font-size: 12px; text-align: center; pointer-events: none;
+      z-index: 10;
+      background: rgba(0,0,0,.5); padding: 6px 16px; border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.06);
+      letter-spacing: 1px;
+    }
+    #ui span { color: #fbbf24; }
+    #note-display {
+      position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+      color: rgba(255,255,255,.15); font-size: 48px; pointer-events: none;
+      font-family: 'Georgia', serif; z-index: 5;
+      text-align: center; transition: all .2s;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">🎨 <span>119 paintings</span> · hover the swatches · each one sings</div>
+  <div id="note-display">·</div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Body, Events, Composite } = Matter;
+
+    const engine = Engine.create();
+    engine.gravity.y = 0; // No gravity — floating blocks
+    const w = window.innerWidth, h = window.innerHeight;
+    const render = Render.create({
+      element: document.body, engine,
+      options: {
+        width: w, height: h,
+        background: '#1a1a1a', wireframes: false,
+        pixelRatio: window.devicePixelRatio, hasBounds: true
+      }
+    });
+
+    // 119 notes across 7 octaves of the chromatic scale
+    const notes = [];
+    const octaves = ['0','1','2','3','4','5','6','7','8'];
+    const chromatic = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    for (const oct of octaves) {
+      for (const ch of chromatic) {
+        notes.push(ch + oct);
+        if (notes.length >= 119) break;
+      }
+      if (notes.length >= 119) break;
+    }
+
+    // Generate 119 colors — gradient across hues
+    function hslToHex(h, s, l) {
+      s /= 100; l /= 100;
+      const a = s * Math.min(l, 1-l);
+      const f = n => {
+        const k = (n + h/30) % 12;
+        return l - a * Math.max(-1, Math.min(k-3, 9-k, 1));
+      };
+      const toHex = x => Math.round(255 * x).toString(16).padStart(2, '0');
+      return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+    }
+
+    // Audio — floating, ethereal
+    const reverb = new Tone.Reverb({ decay: 60, wet: 0.8 }).toDestination();
+    const delay = new Tone.FeedbackDelay('4n', 0.4).connect(reverb);
+
+    // Poly synth that can handle multiple notes
+    const polySynth = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.1, decay: 2, sustain: 0.3, release: 3 }
+    }).connect(delay);
+
+    const metalSynth = new Tone.MetalSynth({
+      envelope: { attack: 0.001, decay: 0.3, release: 0.5 },
+      harmonicity: 3, resonance: 600
+    }).connect(new Tone.Reverb({ decay: 5, wet: 0.3 }).toDestination());
+
+    const noteDisplay = document.getElementById('note-display');
+
+    // Create 119 swatches as floating bodies
+    const cols = 17; // 17 columns = 7 rows of 17 = 119
+    const rows = 7;
+    const swatchW = w / cols;
+    const swatchH = h / rows;
+
+    let bodies = [];
+    let activeNotes = new Set();
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        if (idx >= 119) break;
+
+        const hue = (idx / 119) * 360;
+        const color = hslToHex(hue, 70, 50 + (r % 3) * 10);
+        const x = c * swatchW + swatchW/2;
+        const y = r * swatchH + swatchH/2;
+        const size = Math.min(swatchW, swatchH) * 0.85;
+
+        const body = Bodies.rectangle(x, y, size * 0.9, size * 0.9, {
+          isStatic: true,
+          isSensor: true,
+          render: {
+            fillStyle: color,
+            strokeStyle: 'rgba(255,255,255,0.05)',
+            lineWidth: 1
+          },
+          label: 'swatch',
+          plugin: { noteIdx: idx }
+        });
+
+        bodies.push(body);
+        Composite.add(engine.world, body);
+      }
+    }
+
+    // Hover detection via Matter mouse
+    let lastPlayed = new Map();
+
+    render.canvas.addEventListener('mousemove', (e) => {
+      const mx = e.clientX, my = e.clientY;
+
+      bodies.forEach((body, idx) => {
+        const bx = body.position.x, by = body.position.y;
+        const half = Math.min(swatchW, swatchH) * 0.4;
+        const hit = mx > bx - half && mx < bx + half && my > by - half && my < by + half;
+
+        if (hit) {
+          const now = Date.now();
+          const last = lastPlayed.get(idx) || 0;
+          if (now - last > 300) { // Re-trigger cooldown
+            const note = notes[idx] || 'C4';
+            polySynth.triggerAttackRelease(note, '4n');
+            metalSynth.triggerAttackRelease(note, '0.05');
+
+            noteDisplay.textContent = note;
+            noteDisplay.style.color = body.render.fillStyle;
+            noteDisplay.style.transform = 'scale(1.1)';
+            setTimeout(() => noteDisplay.style.transform = 'scale(1)', 150);
+
+            // Pulse the swatch
+            Body.scale(body, 1.05, 1.05);
+            setTimeout(() => Body.scale(body, 0.952, 0.952), 150);
+
+            lastPlayed.set(idx, now);
+          }
+        }
+      });
+    });
+
+    // Touch support
+    render.canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const mx = touch.clientX, my = touch.clientY;
+      bodies.forEach((body, idx) => {
+        const bx = body.position.x, by = body.position.y;
+        const half = Math.min(swatchW, swatchH) * 0.4;
+        const hit = mx > bx - half && mx < bx + half && my > by - half && my < by + half;
+        if (hit) {
+          const now = Date.now();
+          const last = lastPlayed.get(idx) || 0;
+          if (now - last > 300) {
+            const note = notes[idx] || 'C4';
+            polySynth.triggerAttackRelease(note, '4n');
+            metalSynth.triggerAttackRelease(note, '0.05');
+            noteDisplay.textContent = note;
+            noteDisplay.style.color = body.render.fillStyle;
+            lastPlayed.set(idx, now);
+          }
+        }
+      });
+    }, { passive: false });
+
+    // Click = random burst of color
+    render.canvas.addEventListener('click', (e) => {
+      const burstNotes = [];
+      for (let i = 0; i < 5; i++) {
+        const idx = Math.floor(Math.random() * 119);
+        burstNotes.push(notes[idx] || 'C4');
+      }
+      polySynth.triggerAttackRelease(burstNotes, '2n');
+      noteDisplay.textContent = '✦';
+      noteDisplay.style.color = '#fff';
+    });
+
+    Runner.run(Runner.create(), engine);
+    Render.run(render);
+  </script>
+</body>
+</html>
