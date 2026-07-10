@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>🔄 Gravity Flip</title>
+  <meta name="description" content="Flip gravity. Balls go everywhere. Sound changes with direction.">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0e17; }
+    canvas { display: block; }
+    #ui {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      color: #888; font-size: 13px; text-align: center; pointer-events: none;
+      font-family: 'Helvetica Neue', sans-serif; z-index: 10;
+      background: rgba(0,0,0,.6); padding: 8px 24px; border-radius: 30px;
+      border: 1px solid rgba(255,255,255,.08);
+    }
+    #ui span { color: #f97316; }
+    #gravity-dir { color: #60e; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div id="ui">🔄 <span>gravity flip</span> · click to spawn · space to flip · direction: <span id="gravity-dir">⬇️ DOWN</span></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Body, Events, Composite } = Matter;
+
+    const engine = Engine.create();
+    const w = window.innerWidth, h = window.innerHeight;
+    const render = Render.create({
+      element: document.body, engine,
+      options: {
+        width: w, height: h,
+        background: '#0a0e17', wireframes: false,
+        pixelRatio: window.devicePixelRatio, hasBounds: true
+      }
+    });
+
+    // Audio
+    const reverb = new Tone.Reverb({ decay: 8, wet: 0.5 }).toDestination();
+    const synth = new Tone.FMSynth({
+      harmonicity: 2, modulationIndex: 3,
+      envelope: { attack: 0.01, decay: 0.3, release: 0.2 }
+    }).connect(reverb);
+    const bassSynth = new Tone.MonoSynth({
+      oscillator: { type: 'sine' },
+      envelope: { attack: 0.02, decay: 0.5, release: 0.8 }
+    }).connect(new Tone.Reverb({ decay: 20, wet: 0.6 }).toDestination());
+
+    const notes = ['D2','F2','G2','A2','C3','D3','E3','G3','A3','C4','D4','E4'];
+
+    let balls = [];
+    const gravityDirEl = document.getElementById('gravity-dir');
+    const directions = [
+      { x: 0, y: 1, label: '⬇️ DOWN' },
+      { x: 1, y: 0, label: '➡️ RIGHT' },
+      { x: 0, y: -1, label: '⬆️ UP' },
+      { x: -1, y: 0, label: '⬅️ LEFT' },
+    ];
+    let dirIdx = 0;
+
+    function updateGravity() {
+      const dir = directions[dirIdx];
+      engine.gravity.x = dir.x * 0.5;
+      engine.gravity.y = dir.y * 0.5;
+      gravityDirEl.textContent = dir.label;
+
+      // Bass thump on flip
+      bassSynth.triggerAttackRelease('D2', '0.5');
+
+      // Visual pulse — flip color of all balls
+      balls.forEach(ball => {
+        Body.setVelocity(ball, {
+          x: ball.velocity.x + dir.x * 3,
+          y: ball.velocity.y + dir.y * 3
+        });
+      });
+    }
+
+    // Walls
+    const wallOpts = { isStatic: true, render: { fillStyle: '#121a2e', strokeStyle: '#1a2a4e', lineWidth: 2 } };
+    Composite.add(engine.world, [
+      Bodies.rectangle(w/2, -25, w, 50, wallOpts),
+      Bodies.rectangle(w/2, h+25, w, 50, wallOpts),
+      Bodies.rectangle(-25, h/2, 50, h, wallOpts),
+      Bodies.rectangle(w+25, h/2, 50, h, wallOpts),
+    ]);
+
+    function createBall(x, y) {
+      const colors = ['#f97316','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#eab308','#f43f5e'];
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const size = Math.random() * 15 + 10;
+
+      const ball = Bodies.circle(
+        x || Math.random() * w * 0.8 + w * 0.1,
+        y || Math.random() * h * 0.8 + h * 0.1,
+        size,
+        {
+          restitution: 0.7 + Math.random() * 0.2,
+          friction: 0.02,
+          density: 0.002,
+          render: {
+            fillStyle: color,
+            strokeStyle: 'rgba(255,255,255,0.2)',
+            lineWidth: 1
+          },
+          label: 'Ball'
+        }
+      );
+      balls.push(ball);
+      Composite.add(engine.world, ball);
+    }
+
+    // Collision sounds
+    Events.on(engine, 'collisionStart', (e) => {
+      e.pairs.forEach(pair => {
+        const a = pair.bodyA, b = pair.bodyB;
+        const speed = Math.sqrt(
+          (a.velocity.x - b.velocity.x)**2 + (a.velocity.y - b.velocity.y)**2
+        );
+        const vel = Math.min(1, speed / 15);
+        if (vel > 0.05) {
+          const noteIdx = Math.floor(Math.abs(a.position.x + a.position.y) / 100) % notes.length;
+          synth.triggerAttackRelease(notes[noteIdx], `${0.05 + vel * 0.2}`, undefined, vel * 0.4);
+        }
+      });
+    });
+
+    // Spawn initial 10 balls
+    for (let i = 0; i < 10; i++) setTimeout(createBall, i * 100);
+
+    // Click to add balls
+    render.canvas.addEventListener('click', (e) => {
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => createBall(
+          e.clientX + (Math.random()-0.5)*40,
+          e.clientY + (Math.random()-0.5)*40
+        ), i * 80);
+      }
+    });
+
+    // Space to flip gravity
+    document.body.onkeyup = (e) => {
+      if (e.key === ' ' || e.code === 'Space') {
+        dirIdx = (dirIdx + 1) % directions.length;
+        updateGravity();
+      }
+    };
+
+    // Also flip on right-click
+    render.canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      dirIdx = (dirIdx + 1) % directions.length;
+      updateGravity();
+    });
+
+    Runner.run(Runner.create(), engine);
+    Render.run(render);
+  </script>
+</body>
+</html>
