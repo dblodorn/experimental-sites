@@ -1,0 +1,134 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>🔄 Drum Chamber</title><meta name="description" content="Gravity flip balls bouncing off mounted drums."><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden;background:#0a0e17}canvas{display:block}#ui{position:fixed;top:14px;left:50%;transform:translateX(-50%);color:#888;font-size:12px;text-align:center;pointer-events:none;z-index:10;background:rgba(0,0,0,.6);padding:6px 18px;border-radius:20px;border:1px solid rgba(255,255,255,.08);font-family:'Helvetica Neue',sans-serif}#ui span{color:#f97316}#gd{color:#60e;font-weight:bold}#bc{color:#0ff}#dc{color:#ff6b6b}</style></head><body><div id="ui">🔄 <span>drum chamber</span> · click to spawn · space to flip · right-click ball to delete · balls: <span id="bc">0</span> drums: <span id="dc">0</span></div><script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script><script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script><script>
+const{Engine,Render,Runner,Bodies,Body,Events,Composite,Mouse,MouseConstraint}=Matter;const e=Engine.create();const w=innerWidth,h=innerHeight;const r=Render.create({element:document.body,engine:e,options:{width:w,height:h,background:'#0a0e17',wireframes:false,pixelRatio:devicePixelRatio,hasBounds:true}});
+const rev=new Tone.Reverb({decay:10,wet:.5}).toDestination();const sy=new Tone.FMSynth({harmonicity:2,modulationIndex:3,envelope:{attack:.01,decay:.3,release:.2}}).connect(rev);
+const drumRev=new Tone.Reverb({decay:3,wet:.3}).toDestination();
+const bs=new Tone.MonoSynth({oscillator:{type:'sine'},envelope:{attack:.02,decay:.5,release:.8}}).connect(new Tone.Reverb({decay:20,wet:.6}).toDestination());
+const notes=['D2','F2','G2','A2','C3','D3','E3','G3','A3','C4','D4','E4'];let balls=[];let drums=[];
+const gd=document.getElementById('gd');const bc=document.getElementById('bc');const dc=document.getElementById('dc');
+const dirs=[{x:0,y:1,l:'⬇️'},{x:1,y:0,l:'➡️'},{x:0,y:-1,l:'⬆️'},{x:-1,y:0,l:'⬅️'}];let dI=0;
+function flip(){const d=dirs[dI];e.gravity.x=.5*d.x;e.gravity.y=.5*d.y;gd.textContent=d.l;bs.triggerAttackRelease('D2','.5');balls.forEach(b=>Body.setVelocity(b,{x:b.velocity.x+3*d.x,y:b.velocity.y+3*d.y}))}
+
+// Walls
+const wo={isStatic:true,render:{fillStyle:'#121a2e',strokeStyle:'#1a2a4e',lineWidth:2}};
+Composite.add(e.world,[Bodies.rectangle(w/2,-25,w,50,wo),Bodies.rectangle(w/2,h+25,w,50,wo),Bodies.rectangle(-25,h/2,50,h,wo),Bodies.rectangle(w+25,h/2,50,h,wo)]);
+
+// ── Mounted drum shapes near the top ──
+function mkDrum(x,y,shape,size,color,note){
+  let body;
+  const s=size||25;
+  switch(shape){
+    case't':body=Bodies.polygon(x,y,3,s,{isStatic:true,restitution:.6,render:{fillStyle:color||'#c04c2c',strokeStyle:'rgba(255,200,150,.3)',lineWidth:2},label:'drum'});break;
+    case'sq':body=Bodies.rectangle(x,y,s,s,{isStatic:true,restitution:.5,render:{fillStyle:color||'#d4a017',strokeStyle:'rgba(255,220,100,.3)',lineWidth:2},label:'drum'});break;
+    default:body=Bodies.circle(x,y,s,{isStatic:true,restitution:.7,render:{fillStyle:color||'#9b1b30',strokeStyle:'rgba(255,150,150,.3)',lineWidth:2},label:'drum'});break;
+  }
+  const voice={drum:new Tone.MembraneSynth({frequency:note,envelope:{attack:.001,decay:1.5,release:.5},pitchDecay:.06,octaves:3,volume:-8}).connect(drumRev),
+              sub:new Tone.MonoSynth({oscillator:{type:'triangle'},envelope:{attack:.005,decay:.8,release:.4},volume:-14}).connect(drumRev)};
+  body._note=note;body._voice=voice;
+  drums.push({body,voice,note});
+  Composite.add(e.world,body);
+  return body;
+}
+
+// Mounted drums — row near top
+const drumY=h*0.08;const drumSpacing=w/9;
+const drumNotes=['C2','D2','E2','G2','A2','C3','D3','E3','G3','A3'];
+const drumColors=['#9b1b30','#c04c2c','#d4a017','#6b8e23','#1d6f7a','#4a3f6b','#7a4b6e','#2b5f8a','#c45a3c','#5c6a72'];
+const drumShapes=['circle','circle','triangle','square','circle','triangle','circle','square','circle','triangle'];
+
+for(let i=0;i<10;i++){
+  const x=(i+.5)/10*w;const sz=15+Math.random()*18;
+  mkDrum(x,drumY+(i%2)*30,drumShapes[i],sz,drumColors[i],drumNotes[i%drumNotes.length]);
+}
+// A couple more at different heights
+mkDrum(w*.15,drumY-25,'circle',22,drumColors[4],'F#2');
+mkDrum(w*.85,drumY-25,'square',20,drumColors[7],'A#2');
+dc.textContent=drums.length;
+
+// ── Balls ──
+function cBall(x,y){
+  const c=['#f97316','#8b5cf6','#06b6d4','#ec4899','#14b8a6','#eab308','#f43f5e'][Math.floor(7*Math.random())];
+  const sz=10+15*Math.random();
+  const b=Bodies.circle(x||.1*w+.8*w*Math.random(),y||.1*h+.8*h*Math.random(),sz,{
+    restitution:.7+.2*Math.random(),friction:.02,density:.002,
+    render:{fillStyle:c,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},
+    label:'ball'
+  });
+  b._color=c;
+  balls.push(b);Composite.add(e.world,b);bc.textContent=balls.length;
+}
+
+// ── Collisions ──
+let lastDrumTime={};
+Events.on(e,'collisionStart',ev=>{ev.pairs.forEach(p=>{
+  const a=p.bodyA,b=p.bodyB;const now=Date.now();
+  const isBall=a.label==='ball'||b.label==='ball';
+  const isDrum=a.label==='drum'||b.label==='drum';
+  if(isBall&&isDrum){
+    const db=a.label==='drum'?a:b;const d=drums.find(dr=>dr.body===db);
+    if(!d)return;const l=lastDrumTime[d.note]||0;if(now-l<150)return;lastDrumTime[d.note]=now;
+    const s=Math.sqrt((a.velocity.x-b.velocity.x)**2+(a.velocity.y-b.velocity.y)**2);
+    const v=Math.min(1,Math.max(.03,s/18));
+    d.voice.drum.triggerAttackRelease(d.note,'.8',undefined,Math.min(.5,v*.7));
+    d.voice.sub.triggerAttackRelease(d.note,'.5',undefined,Math.min(.15,v*.3));
+    Body.scale(db,1.08,1.08);setTimeout(()=>Body.scale(db,.926,.926),60);
+  }
+  // Ball-ball sounds stay as original
+  if(isBall&&b.label==='wall'){}else if(isBall&&a.label==='ball'&&b.label==='ball'){
+    const s=Math.sqrt((a.velocity.x-b.velocity.x)**2+(a.velocity.y-b.velocity.y)**2);
+    const v=Math.min(1,s/18);
+    if(v>.05){const ni=Math.floor(Math.abs(a.position.x+a.position.y)/100)%notes.length;
+      sy.triggerAttackRelease(notes[ni],.05+.2*v,void 0,.4*v);}
+  }
+})});
+
+// ── Right-click to delete nearest ball ──
+r.canvas.addEventListener('contextmenu',ev=>{
+  ev.preventDefault();
+  const mx=ev.clientX,my=ev.clientY;
+  if(balls.length===0)return;
+  let nearest=null,nearestDist=Infinity;
+  balls.forEach(b=>{
+    const dx=b.position.x-mx,dy=b.position.y-my;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist<nearestDist){nearestDist=dist;nearest=b;}
+  });
+  if(nearest&&nearestDist<150){
+    const idx=balls.indexOf(nearest);
+    if(idx>-1){balls.splice(idx,1);Composite.remove(e.world,nearest);bc.textContent=balls.length;
+      sy.triggerAttackRelease('C2','.15');}
+  }
+});
+
+// Keyboard: D to delete nearest ball to center
+document.body.onkeyup=ev=>{
+  if(ev.key===' '||ev.code==='Space'){dI=(dI+1)%4;flip();return;}
+  if(ev.key==='d'||ev.key==='D'){
+    if(balls.length===0)return;
+    // Delete the ball closest to the center
+    let nearest=null,nearestDist=Infinity;
+    balls.forEach(b=>{
+      const dx=b.position.x-w/2,dy=b.position.y-h/2;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<nearestDist){nearestDist=dist;nearest=b;}
+    });
+    if(nearest){const idx=balls.indexOf(nearest);
+      if(idx>-1){balls.splice(idx,1);Composite.remove(e.world,nearest);bc.textContent=balls.length;}}
+  }
+};
+
+// Spawn initial balls
+for(let i=0;i<5;i++)setTimeout(cBall,200*i);
+
+// Click to spawn
+r.canvas.addEventListener('click',ev=>{
+  for(let i=0;i<3;i++)setTimeout(()=>cBall(ev.clientX+30*(Math.random()-.5),ev.clientY+30*(Math.random()-.5)),80*i);
+});
+
+// Mouse drag
+const mouse=Mouse.create(r.canvas);
+Composite.add(e.world,MouseConstraint.create(e,{mouse,constraint:{stiffness:.15,render:{visible:false}}}));
+r.mouse=mouse;
+
+Runner.run(Runner.create(),e);Render.run(r);
+window.addEventListener('resize',()=>{r.canvas.width=window.innerWidth;r.canvas.height=window.innerHeight;});
+</script></body></html>
