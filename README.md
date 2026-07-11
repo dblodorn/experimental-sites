@@ -1,4 +1,4 @@
-# 🎪 Experimental Sites
+# 🤡 Experimental Sites
 
 Silly, playful, experimental websites built with Matter.js + Tone.js physics + sound.
 
