@@ -15,7 +15,7 @@ body{animation:fadeIn 1.5s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}<
   <button id="btn-circle" title="drop circle">⬤</button>
   <button id="btn-triangle" title="drop triangle">▲</button>
   <button id="btn-square" title="drop square">■</button>
-  <button id="btn-poop" title="drop poop">💩</button>
+  <button id="btn-poop" title="drop turd">💩</button>
   <button id="btn-hexagon" title="drop hexagon">⬡</button>
 </div>
 <div id="controls">
@@ -33,27 +33,55 @@ const e=Engine.create();e.gravity.y=.35;
 const w=innerWidth,h=innerHeight;
 const r=Render.create({element:document.body,engine:e,options:{width:w,height:h,background:'#87ceeb',wireframes:false,pixelRatio:devicePixelRatio,hasBounds:true}});
 
-// ── Cloud background (drawn over the canvas) ──
+// ── Clouds ──
 const clouds=[];
-for(let i=0;i<8;i++){
-  clouds.push({
-    x:Math.random()*w,y:Math.random()*h*0.6,
-    rx:50+Math.random()*120,ry:30+Math.random()*60,
-    alpha:.15+Math.random()*.25
-  });
-}
-// Custom render override for clouds
+for(let i=0;i<8;i++)clouds.push({x:Math.random()*w,y:Math.random()*h*0.6,rx:50+Math.random()*120,ry:30+Math.random()*60,alpha:.15+Math.random()*.25});
+
+// ── Custom render (clouds + realistic turds) ──
 const origRender=r.render;
 r.render=function(){
   origRender.call(this);
   const ctx=this.context;
+  // Clouds
   clouds.forEach(c=>{
     ctx.beginPath();ctx.ellipse(c.x,c.y,c.rx,c.ry,0,0,Math.PI*2);
     ctx.fillStyle=`rgba(255,255,255,${c.alpha})`;ctx.fill();
-    // secondary puffs
     ctx.beginPath();ctx.ellipse(c.x-c.rx*0.5,c.y-c.ry*0.3,c.rx*0.6,c.ry*0.7,0,0,Math.PI*2);
     ctx.fill();ctx.beginPath();ctx.ellipse(c.x+c.rx*0.5,c.y-c.ry*0.2,c.rx*0.5,c.ry*0.8,0,0,Math.PI*2);
     ctx.fill();
+  });
+  // Realistic poop rendering
+  Composite.allBodies(e.world).forEach(body=>{
+    if(body.label!=='poop')return;
+    const p=body.position;
+    ctx.save();ctx.translate(p.x,p.y);ctx.rotate(body.angle);
+    const s=body.circleRadius||body.bounds.max.x-body.bounds.min.x;
+    const sz=s*0.5;
+    const seed=body.id%100;
+    const hue=25+seed%12;
+    // Organic three-lobed turd with per-poop variation
+    ctx.beginPath();
+    ctx.moveTo(0,-sz*1.1);
+    ctx.bezierCurveTo(sz*(0.8+seed*0.003),-sz*0.7,sz*1.1,-sz*0.2,sz*1.0,sz*0.1+seed*0.003);
+    ctx.bezierCurveTo(sz*0.9,sz*(0.5+seed*0.004),sz*0.5,sz*1.0,0,sz*0.9);
+    ctx.bezierCurveTo(-sz*0.5,sz*1.0,-sz*0.9,sz*(0.5+seed*0.003),-sz*1.0,sz*0.1);
+    ctx.bezierCurveTo(-sz*1.1,-sz*0.2,-sz*0.8,-sz*0.7,0,-sz*1.1);
+    ctx.closePath();
+    const grad=ctx.createRadialGradient(-sz*0.3,-sz*0.3,sz*0.1,0,0,sz*1.2);
+    grad.addColorStop(0,`hsl(${hue},55%,38%)`);grad.addColorStop(0.3,`hsl(${hue},50%,28%)`);
+    grad.addColorStop(0.7,`hsl(${hue},45%,20%)`);grad.addColorStop(1,`hsl(${hue},40%,13%)`);
+    ctx.fillStyle=grad;ctx.fill();
+    // Highlight
+    ctx.beginPath();ctx.ellipse(-sz*0.2,-sz*0.3,sz*0.35,sz*0.2,-0.3,0,Math.PI*2);
+    ctx.fillStyle=`hsla(${hue+10},40%,55%,0.2)`;ctx.fill();
+    // Dark edge
+    ctx.strokeStyle=`hsla(${hue-5},40%,10%,0.35)`;ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(0,-sz*1.1);
+    ctx.bezierCurveTo(sz*(0.8+seed*0.003),-sz*0.7,sz*1.1,-sz*0.2,sz*1.0,sz*0.1+seed*0.003);
+    ctx.bezierCurveTo(sz*0.9,sz*(0.5+seed*0.004),sz*0.5,sz*1.0,0,sz*0.9);
+    ctx.bezierCurveTo(-sz*0.5,sz*1.0,-sz*0.9,sz*(0.5+seed*0.003),-sz*1.0,sz*0.1);
+    ctx.bezierCurveTo(-sz*1.1,-sz*0.2,-sz*0.8,-sz*0.7,0,-sz*1.1);
+    ctx.stroke();ctx.restore();
   });
 };
 
@@ -68,13 +96,8 @@ document.getElementById('pitch-ctrl').onchange=e=>ctrlPitch=e.target.value;
 const masterRev=new Tone.Reverb({decay:15,wet:.5}).toDestination();
 const masterDelay=new Tone.FeedbackDelay('8n',.12).connect(masterRev);
 
-function noteFromPitch(p){const chromatic=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  const oct=parseInt(p.slice(-1));const base=chromatic.indexOf(p.slice(0,-1));
-  const midi=(oct+1)*12+base;return Tone.Frequency(midi,'midi').toFrequency();}
-
-// Shape → unique voice
 function createVoice(shape,pitch){
-  const p=pitch||ctrlPitch;const base=noteFromPitch(p);
+  const p=pitch||ctrlPitch;
   const volVal=-8+(ctrlVol*12)-12;
   const harm=1+ctrlHarm*4;const dec=.2+ctrlDecay*3;
   switch(shape){
@@ -96,14 +119,13 @@ function createVoice(shape,pitch){
   }
 }
 
-// ── Hanging shapes (pulled down from top) ──
+// ── Hanging shapes ──
 const anchorY=25;
 const hShapes=[];let hIdx=0;
-const hTypes=['circle','triangle','square','hexagon'];
 const hColors=['#9b1b30','#c04c2c','#d4a017','#2b5f8a','#6b8e23','#4a3f6b','#1d6f7a','#7a4b6e'];
 
 function createHangingShape(x,type){
-  const t=type||hTypes[hIdx%hTypes.length];hIdx++;
+  const t=type||['circle','triangle','square','hexagon'][hIdx%4];hIdx++;
   const color=hColors[hIdx%hColors.length];
   const pitch=['C3','D3','E3','G3','A3','C4','D4','E4','G4','A4'][Math.floor(Math.random()*10)];
   let body,size=25+Math.random()*20;
@@ -112,24 +134,18 @@ function createHangingShape(x,type){
     case'triangle':body=Bodies.polygon(x,anchorY+40,3,size,{density:.003,restitution:.35,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
     case'square':body=Bodies.rectangle(x,anchorY+40,size,size,{density:.004,restitution:.3,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
     case'hexagon':body=Bodies.polygon(x,anchorY+40,6,size,{density:.003,restitution:.4,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
-    case'poop':body=Bodies.circle(x,anchorY+40,size,{density:.003,restitution:.6,friction:.1,render:{fillStyle:'#6b4a2e',strokeStyle:'rgba(255,200,150,.2)',lineWidth:1},label:'poop'});break;
+    case'poop':body=Bodies.circle(x,anchorY+40,size,{density:.003,restitution:.6,friction:.1,render:{visible:false},label:'poop'});break;
   }
   const str=Constraint.create({pointA:{x,y:anchorY},bodyB:body,pointB:{x:0,y:-size*.8},stiffness:.6,damping:.05,length:8,render:{strokeStyle:'rgba(255,255,255,.2)',lineWidth:.5}});
   const voice=createVoice(t,pitch);
   const obj={body,str,voice,type:t,pitch,color};
   hShapes.push(obj);Composite.add(e.world,[body,str]);return obj;
 }
+for(let i=0;i<7;i++)createHangingShape((i+.5)/7*w);
 
-// Create initial hanging shapes
-const hangCount=7;
-for(let i=0;i<hangCount;i++)createHangingShape((i+.5)/hangCount*w);
-
-// ── Droppable shapes (click to spawn) ──
+// ── Droppable shapes ──
 function dropShape(x,y,type){
-  const voices={
-    circle:createVoice('circle'),triangle:createVoice('triangle'),
-    square:createVoice('square'),hexagon:createVoice('hexagon'),poop:createVoice('poop')
-  };
+  const voices={circle:createVoice('circle'),triangle:createVoice('triangle'),square:createVoice('square'),hexagon:createVoice('hexagon'),poop:createVoice('poop')};
   let body,size=18+Math.random()*16;
   const color=hColors[Math.floor(Math.random()*hColors.length)];
   switch(type){
@@ -137,36 +153,35 @@ function dropShape(x,y,type){
     case'triangle':body=Bodies.polygon(x||.5*w,y||-30,3,size,{restitution:.5,density:.002,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
     case'square':body=Bodies.rectangle(x||.5*w,y||-30,size,size,{restitution:.5,density:.003,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
     case'hexagon':body=Bodies.polygon(x||.5*w,y||-30,6,size,{restitution:.6,density:.002,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
-    case'poop':body=Bodies.circle(x||.5*w,y||-30,size*1.2,{restitution:.7,density:.001,friction:.1,render:{fillStyle:'#6b4a2e',strokeStyle:'rgba(255,200,150,.15)',lineWidth:1},label:'drop'});break;
+    case'poop':body=Bodies.circle(x||.5*w,y||-30,size*1.2,{restitution:.7,density:.001,friction:.1,render:{visible:false},label:'poop'});break;
   }
   body._voice=voices[type];body._type=type;
   Composite.add(e.world,body);
 }
 
 // ── Collision sounds ──
-let lastHit={};
+let lastHitMsgs={};
 Events.on(e,'collisionStart',ev=>{ev.pairs.forEach(p=>{
-  const a=p.bodyA,b=p.bodyB;const now=Date.now();
-  const hShape=a.label==='circle'||a.label==='triangle'||a.label==='square'||a.label==='hexagon'||a.label==='poop';
-  const hShape2=b.label==='circle'||b.label==='triangle'||b.label==='square'||b.label==='hexagon'||b.label==='poop';
-  // Dropped shape hits hanging shape
-  if(a.label==='drop'&&hShape2){playHit(b,a);return;}
-  if(b.label==='drop'&&hShape){playHit(a,b);return;}
-  // Hanging shape hits another hanging shape
-  if(hShape&&hShape2&&a!==b){playHit(a,b);}
+  const a=p.bodyA,b=p.bodyB;
+  const isHS=l=>l==='circle'||l==='triangle'||l==='square'||l==='hexagon'||l==='poop';
+  const hS1=isHS(a.label),hS2=isHS(b.label);
+  // dropped shape (has _voice) hits hanging shape (no _voice)
+  if(a._voice&&hS2&&!b._voice){playHit(b,a);return;}
+  if(b._voice&&hS1&&!a._voice){playHit(a,b);return;}
+  if(hS1&&hS2&&a!==b)playHit(a,b);
 })});
 
 function playHit(hitBody,dropBody){
   const hs=hShapes.find(s=>s.body===hitBody);
   if(!hs)return;
-  const v=dropBody?dropBody:hs.body;
+  const now=Date.now();const key=hs.body.id+'_'+Math.floor(now/300);
+  if(lastHitMsgs[key])return;lastHitMsgs[key]=true;
+  const v=dropBody||hs.body;
   const speed=dropBody?Math.sqrt((hitBody.velocity.x-v.velocity.x)**2+(hitBody.velocity.y-v.velocity.y)**2)
     :Math.sqrt(hitBody.velocity.x**2+hitBody.velocity.y**2);
   const vel=Math.min(1,Math.max(.03,speed/15));
-  const key=hs.body.id+'_'+Math.floor(now/200);if(lastHit[key])return;lastHit[key]=true;
-  const pitch=hs.pitch;
-  if(hs.voice.main){hs.voice.main.triggerAttackRelease(pitch,`.5+${vel*2}`,undefined,.3+vel*.4);}
-  if(hs.voice.ring){hs.voice.ring.triggerAttackRelease(pitch,`1+${vel*2}`,undefined,.1+vel*.2);}
+  if(hs.voice.main)hs.voice.main.triggerAttackRelease(hs.pitch,`.5+${vel*2}`,undefined,.3+vel*.4);
+  if(hs.voice.ring)hs.voice.ring.triggerAttackRelease(hs.pitch,`1+${vel*2}`,undefined,.1+vel*.2);
   Body.scale(hitBody,1.03,1.03);setTimeout(()=>Body.scale(hitBody,.97,.97),60);
 }
 
@@ -175,20 +190,16 @@ document.getElementById('btn-circle').onclick=()=>dropShape(null,null,'circle');
 document.getElementById('btn-triangle').onclick=()=>dropShape(null,null,'triangle');
 document.getElementById('btn-square').onclick=()=>dropShape(null,null,'square');
 document.getElementById('btn-hexagon').onclick=()=>dropShape(null,null,'hexagon');
-document.getElementById('btn-poop').onclick=()=>{
-  for(let i=0;i<5;i++)setTimeout(()=>dropShape(w*Math.random(),-30-i*20,'poop'),i*100);
-};
+document.getElementById('btn-poop').onclick=()=>{for(let i=0;i<6;i++)setTimeout(()=>dropShape(w*Math.random(),-30-i*20,'poop'),i*100);};
 
-// Click on canvas to drop random shape
 r.canvas.addEventListener('click',ev=>{
   const types=['circle','triangle','square','hexagon'];
   dropShape(ev.clientX,ev.clientY-30,types[Math.floor(Math.random()*4)]);
 });
 
-// Space = spawn poop rain
 document.body.onkeyup=ev=>{
   if(ev.key===' '||ev.code==='Space'){
-    for(let i=0;i<8;i++)setTimeout(()=>dropShape(w*Math.random()+30*(Math.random()-.5),-30-i*15,'poop'),i*80);
+    for(let i=0;i<10;i++)setTimeout(()=>dropShape(w*Math.random()+30*(Math.random()-.5),-30-i*15,'poop'),i*80);
   }
 };
 
@@ -197,20 +208,13 @@ const mouse=Mouse.create(r.canvas);
 Composite.add(e.world,MouseConstraint.create(e,{mouse,constraint:{stiffness:.1,render:{visible:false}}}));
 r.mouse=mouse;
 
-// ── Walls (invisible, keep things inside) ──
+// ── Invisible walls ──
 Composite.add(e.world,[
   Bodies.rectangle(w/2,-25,w,50,{isStatic:true,isSensor:true,render:{visible:false}}),
   Bodies.rectangle(w/2,h+25,w,50,{isStatic:true,isSensor:true,render:{visible:false}}),
   Bodies.rectangle(-25,h/2,50,h,{isStatic:true,isSensor:true,render:{visible:false}}),
   Bodies.rectangle(w+25,h/2,50,h,{isStatic:true,isSensor:true,render:{visible:false}}),
 ]);
-
-// ── Poop counter ──
-let dropCount=0;const pc=document.getElementById('poop-count');
-const origDrop=dropShape;dropShape=function(x,y,type){
-  origDrop(x,y,type);
-  if(type==='poop'){dropCount++;pc.textContent='💩'.repeat(Math.min(dropCount,10));}
-};
 
 Runner.run(Runner.create(),e);Render.run(r);
 window.addEventListener('resize',()=>{r.canvas.width=window.innerWidth;r.canvas.height=window.innerHeight;});
