@@ -1,4 +1,7 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>☁️ Cloud Shapes</title><meta name="description" content="Pull shapes down from the sky. Each shape sings differently."><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden;font-family:'Helvetica Neue',sans-serif;background:#87ceeb}canvas{display:block}
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>☁️ Cloud Shapes</title><meta name="description" content="Pull shapes down from the sky. Each shape sings differently."><style>
+*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden;font-family:'Helvetica Neue',sans-serif;background:#87ceeb}
+#matter-canvas{position:absolute;top:0;left:0;z-index:1}
+#overlay{position:absolute;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none}
 #ui{position:fixed;top:12px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.6);font-size:11px;text-align:center;pointer-events:none;z-index:10;background:rgba(0,0,0,.25);padding:5px 16px;border-radius:16px;border:1px solid rgba(255,255,255,.1);text-shadow:0 1px 4px rgba(0,0,0,.2);letter-spacing:1px}
 #controls{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:20;background:rgba(255,255,255,.85);backdrop-filter:blur(8px);border-radius:16px;padding:10px 18px;display:flex;gap:16px;align-items:center;box-shadow:0 4px 20px rgba(0,0,0,.1);border:1px solid rgba(255,255,255,.5);pointer-events:auto;font-size:11px;color:#555}
 #controls label{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#888}
@@ -8,15 +11,12 @@
 #spawn-panel button{width:36px;height:36px;border-radius:50%;border:2px solid rgba(255,255,255,.6);background:rgba(255,255,255,.25);backdrop-filter:blur(4px);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;color:rgba(255,255,255,.8)}
 #spawn-panel button:hover{transform:scale(1.15);background:rgba(255,255,255,.4)}
 #poop-count{position:fixed;top:50px;right:20px;z-index:15;font-size:24px;pointer-events:none;opacity:.5}
-body{animation:fadeIn 1.5s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}</style></head><body>
+body{animation:fadeIn 1.5s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+</style></head><body>
 <div id="ui">☁️ cloud shapes · drag shapes down · drop shapes on shapes</div>
 <div id="poop-count">💩</div>
 <div id="spawn-panel">
-  <button id="btn-circle" title="drop circle">⬤</button>
-  <button id="btn-triangle" title="drop triangle">▲</button>
-  <button id="btn-square" title="drop square">■</button>
-  <button id="btn-poop" title="drop turd">💩</button>
-  <button id="btn-hexagon" title="drop hexagon">⬡</button>
+  <button id="btn-circle">⬤</button><button id="btn-triangle">▲</button><button id="btn-square">■</button><button id="btn-poop">💩</button><button id="btn-hexagon">⬡</button>
 </div>
 <div id="controls">
   <label>reverb <input type="range" id="reverb-ctrl" min="0" max="100" value="60"></label>
@@ -25,65 +25,95 @@ body{animation:fadeIn 1.5s ease}@keyframes fadeIn{from{opacity:0}to{opacity:1}}<
   <label>harmonics <input type="range" id="harm-ctrl" min="0" max="100" value="50"></label>
   <label>volume <input type="range" id="vol-ctrl" min="0" max="100" value="70"></label>
 </div>
+<canvas id="overlay"></canvas>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 <script src="https://unpkg.com/tone@14.7.77/build/Tone.js"></script>
 <script>
 const{Engine,Render,Runner,Bodies,Body,Events,Composite,Constraint,Mouse,MouseConstraint}=Matter;
 const e=Engine.create();e.gravity.y=.35;
 const w=innerWidth,h=innerHeight;
-const r=Render.create({element:document.body,engine:e,options:{width:w,height:h,background:'#87ceeb',wireframes:false,pixelRatio:devicePixelRatio,hasBounds:true}});
+const r=Render.create({element:document.getElementById('matter-canvas')||document.body,engine:e,options:{width:w,height:h,background:'#87ceeb',wireframes:false,pixelRatio:devicePixelRatio,hasBounds:true}});
+// Make sure matter canvas has the right z-order
+r.canvas.id='matter-canvas';
+r.canvas.style.position='absolute';
+r.canvas.style.top='0';
+r.canvas.style.left='0';
+r.canvas.style.zIndex='1';
+
+// ── Overlay canvas for clouds + turds ──
+const oc=document.getElementById('overlay');
+oc.width=w;oc.height=h;
+const octx=oc.getContext('2d');
 
 // ── Clouds ──
 const clouds=[];
-for(let i=0;i<8;i++)clouds.push({x:Math.random()*w,y:Math.random()*h*0.6,rx:50+Math.random()*120,ry:30+Math.random()*60,alpha:.15+Math.random()*.25});
+for(let i=0;i<8;i++)clouds.push({x:Math.random()*w,y:Math.random()*h*0.6,rx:Math.random()*120+50,ry:Math.random()*60+30,alpha:Math.random()*.25+.15});
 
-// ── Custom render (clouds + realistic turds) ──
-const origRender=r.render;
-r.render=function(){
-  origRender.call(this);
-  const ctx=this.context;
-  // Clouds
+// ── Draw loop for overlay ──
+function drawOverlay(){
+  octx.clearRect(0,0,w,h);
+  // 1. Clouds
   clouds.forEach(c=>{
-    ctx.beginPath();ctx.ellipse(c.x,c.y,c.rx,c.ry,0,0,Math.PI*2);
-    ctx.fillStyle=`rgba(255,255,255,${c.alpha})`;ctx.fill();
-    ctx.beginPath();ctx.ellipse(c.x-c.rx*0.5,c.y-c.ry*0.3,c.rx*0.6,c.ry*0.7,0,0,Math.PI*2);
-    ctx.fill();ctx.beginPath();ctx.ellipse(c.x+c.rx*0.5,c.y-c.ry*0.2,c.rx*0.5,c.ry*0.8,0,0,Math.PI*2);
-    ctx.fill();
+    octx.save();
+    octx.globalAlpha=c.alpha;
+    octx.fillStyle='#fff';
+    octx.beginPath();octx.ellipse(c.x,c.y,c.rx,c.ry,0,0,Math.PI*2);octx.fill();
+    octx.beginPath();octx.ellipse(c.x-c.rx*.5,c.y-c.ry*.3,c.rx*.6,c.ry*.7,0,0,Math.PI*2);octx.fill();
+    octx.beginPath();octx.ellipse(c.x+c.rx*.5,c.y-c.ry*.2,c.rx*.5,c.ry*.8,0,0,Math.PI*2);octx.fill();
+    octx.restore();
   });
-  // Realistic poop rendering
-  Composite.allBodies(e.world).forEach(body=>{
-    if(body.label!=='poop')return;
+  // 2. Realistic turds
+  const allBodies=Composite.allBodies(e.world);
+  for(let i=0;i<allBodies.length;i++){
+    const body=allBodies[i];
+    if(body.label!=='poop')continue;
     const p=body.position;
-    ctx.save();ctx.translate(p.x,p.y);ctx.rotate(body.angle);
-    const s=body.circleRadius||body.bounds.max.x-body.bounds.min.x;
-    const sz=s*0.5;
+    const s=body.circleRadius||20;
+    const sz=s*.6;
     const seed=body.id%100;
     const hue=25+seed%12;
-    // Organic three-lobed turd with per-poop variation
-    ctx.beginPath();
-    ctx.moveTo(0,-sz*1.1);
-    ctx.bezierCurveTo(sz*(0.8+seed*0.003),-sz*0.7,sz*1.1,-sz*0.2,sz*1.0,sz*0.1+seed*0.003);
-    ctx.bezierCurveTo(sz*0.9,sz*(0.5+seed*0.004),sz*0.5,sz*1.0,0,sz*0.9);
-    ctx.bezierCurveTo(-sz*0.5,sz*1.0,-sz*0.9,sz*(0.5+seed*0.003),-sz*1.0,sz*0.1);
-    ctx.bezierCurveTo(-sz*1.1,-sz*0.2,-sz*0.8,-sz*0.7,0,-sz*1.1);
-    ctx.closePath();
-    const grad=ctx.createRadialGradient(-sz*0.3,-sz*0.3,sz*0.1,0,0,sz*1.2);
-    grad.addColorStop(0,`hsl(${hue},55%,38%)`);grad.addColorStop(0.3,`hsl(${hue},50%,28%)`);
-    grad.addColorStop(0.7,`hsl(${hue},45%,20%)`);grad.addColorStop(1,`hsl(${hue},40%,13%)`);
-    ctx.fillStyle=grad;ctx.fill();
-    // Highlight
-    ctx.beginPath();ctx.ellipse(-sz*0.2,-sz*0.3,sz*0.35,sz*0.2,-0.3,0,Math.PI*2);
-    ctx.fillStyle=`hsla(${hue+10},40%,55%,0.2)`;ctx.fill();
-    // Dark edge
-    ctx.strokeStyle=`hsla(${hue-5},40%,10%,0.35)`;ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(0,-sz*1.1);
-    ctx.bezierCurveTo(sz*(0.8+seed*0.003),-sz*0.7,sz*1.1,-sz*0.2,sz*1.0,sz*0.1+seed*0.003);
-    ctx.bezierCurveTo(sz*0.9,sz*(0.5+seed*0.004),sz*0.5,sz*1.0,0,sz*0.9);
-    ctx.bezierCurveTo(-sz*0.5,sz*1.0,-sz*0.9,sz*(0.5+seed*0.003),-sz*1.0,sz*0.1);
-    ctx.bezierCurveTo(-sz*1.1,-sz*0.2,-sz*0.8,-sz*0.7,0,-sz*1.1);
-    ctx.stroke();ctx.restore();
-  });
-};
+    octx.save();
+    octx.translate(p.x,p.y);
+    octx.rotate(body.angle);
+    // shadow
+    octx.beginPath();
+    octx.ellipse(3,5,sz*.9,sz*.4,0,0,Math.PI*2);
+    octx.fillStyle='rgba(0,0,0,0.12)';
+    octx.fill();
+    // main body — organic blob
+    octx.beginPath();
+    const w1=sz*(.8+seed*.003),w2=sz*(.5+seed*.004);
+    octx.moveTo(0,-sz*1.2);
+    octx.bezierCurveTo(w1,-sz*.8,sz*1.2,-sz*.3,sz*1.1,sz*.1+seed*.003);
+    octx.bezierCurveTo(sz*.95,sz*.5+w2*.2,sz*.6,sz*1.1,0,sz*1.0);
+    octx.bezierCurveTo(-sz*.6,sz*1.1,-sz*.95,sz*.5+w2*.2,-sz*1.1,sz*.1);
+    octx.bezierCurveTo(-sz*1.2,-sz*.3,-w1,-sz*.8,0,-sz*1.2);
+    octx.closePath();
+    const grad=octx.createRadialGradient(-sz*.2,-sz*.2,sz*.05,0,0,sz*1.3);
+    grad.addColorStop(0,`hsl(${hue},55%,42%)`);
+    grad.addColorStop(.3,`hsl(${hue},50%,30%)`);
+    grad.addColorStop(.7,`hsl(${hue},45%,20%)`);
+    grad.addColorStop(1,`hsl(${hue},40%,12%)`);
+    octx.fillStyle=grad;
+    octx.fill();
+    // highlight
+    octx.beginPath();
+    octx.ellipse(-sz*.2,-sz*.3,sz*.3,sz*.15,-.3,0,Math.PI*2);
+    octx.fillStyle=`hsla(${hue+10},40%,55%,0.25)`;
+    octx.fill();
+    // texture streaks
+    for(let t=0;t<3;t++){
+      const tx=-sz*.4+sz*.4*t;
+      octx.beginPath();
+      octx.ellipse(tx,sz*.1+seed*.003,sz*.3,sz*.05,0,0,Math.PI*2);
+      octx.fillStyle=`hsla(${hue-5},35%,15%,0.15)`;
+      octx.fill();
+    }
+    octx.restore();
+  }
+  requestAnimationFrame(drawOverlay);
+}
+drawOverlay();
 
 // ── Audio ──
 let ctrlReverb=.6,ctrlDecay=.4,ctrlHarm=.5,ctrlVol=.7,ctrlPitch='D3';
@@ -92,130 +122,85 @@ document.getElementById('decay-ctrl').oninput=e=>ctrlDecay=e.target.value/100;
 document.getElementById('harm-ctrl').oninput=e=>ctrlHarm=e.target.value/100;
 document.getElementById('vol-ctrl').oninput=e=>ctrlVol=e.target.value/100;
 document.getElementById('pitch-ctrl').onchange=e=>ctrlPitch=e.target.value;
-
-const masterRev=new Tone.Reverb({decay:15,wet:.5}).toDestination();
-const masterDelay=new Tone.FeedbackDelay('8n',.12).connect(masterRev);
+const mRev=new Tone.Reverb({decay:15,wet:.5}).toDestination();
+const mDel=new Tone.FeedbackDelay('8n',.12).connect(mRev);
 
 function createVoice(shape,pitch){
-  const p=pitch||ctrlPitch;
-  const volVal=-8+(ctrlVol*12)-12;
-  const harm=1+ctrlHarm*4;const dec=.2+ctrlDecay*3;
+  const p=pitch||ctrlPitch;const v=-8+(ctrlVol*12)-12;const h=1+ctrlHarm*4;const d=.2+ctrlDecay*3;
+  const C=(s)=>{s.connect(mDel);return s;};
   switch(shape){
-    case'circle':return{
-      main:new Tone.MetalSynth({frequency:p,envelope:{attack:.003,decay:dec,release:dec*1.5},harmonicity:harm,modulationIndex:8+ctrlHarm*20,resonance:400,volume:volVal}).connect(masterDelay),
-      ring:new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:.005,decay:dec*1.5,sustain:.05,release:dec*2},volume:volVal-8}).connect(masterDelay)};
-    case'triangle':return{
-      main:new Tone.PluckSynth({envelope:{attack:.001,decay:dec*.5,release:dec*.8},volume:volVal+2}).connect(masterDelay),
-      ring:new Tone.Synth({oscillator:{type:'triangle'},envelope:{attack:.002,decay:dec*.8,release:dec},volume:volVal-4}).connect(masterDelay)};
-    case'square':return{
-      main:new Tone.MembraneSynth({frequency:p,envelope:{attack:.001,decay:dec*1.5,release:.5},pitchDecay:.05,octaves:3,volume:volVal-2}).connect(masterDelay),
-      ring:new Tone.Synth({oscillator:{type:'square'},envelope:{attack:.003,decay:dec*.6,release:.4},volume:volVal-8}).connect(masterDelay)};
-    case'hexagon':return{
-      main:new Tone.FMSynth({harmonicity:harm,modulationIndex:12+ctrlHarm*20,envelope:{attack:.01,decay:dec,release:dec},volume:volVal+1}).connect(masterDelay),
-      ring:new Tone.Synth({oscillator:{type:'sawtooth'},envelope:{attack:.003,decay:dec*.5,release:.3},volume:volVal-6}).connect(masterDelay)};
-    case'poop':return{
-      main:new Tone.MetalSynth({frequency:p,envelope:{attack:.001,decay:.8,release:1.5},harmonicity:0.5+ctrlHarm,modulationIndex:30,resonance:2000,volume:volVal+5}).connect(masterDelay),
-      ring:new Tone.MonoSynth({oscillator:{type:'sawtooth'},envelope:{attack:.001,decay:.3,release:.8},volume:volVal-2}).connect(masterDelay)};
+    case'circle':return{R:C(new Tone.MetalSynth({frequency:p,envelope:{attack:.003,decay:d,release:d*1.5},harmonicity:h,modulationIndex:8+ctrlHarm*20,resonance:400,volume:v})),S:C(new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:.005,decay:d*1.5,sustain:.05,release:d*2},volume:v-8}))};
+    case'triangle':return{R:C(new Tone.PluckSynth({envelope:{attack:.001,decay:d*.5,release:d*.8},volume:v+2})),S:C(new Tone.Synth({oscillator:{type:'triangle'},envelope:{attack:.002,decay:d*.8,release:d},volume:v-4}))};
+    case'square':return{R:C(new Tone.MembraneSynth({frequency:p,envelope:{attack:.001,decay:d*1.5,release:.5},pitchDecay:.05,octaves:3,volume:v-2})),S:C(new Tone.Synth({oscillator:{type:'square'},envelope:{attack:.003,decay:d*.6,release:.4},volume:v-8}))};
+    case'hexagon':return{R:C(new Tone.FMSynth({harmonicity:h,modulationIndex:12+ctrlHarm*20,envelope:{attack:.01,decay:d,release:d},volume:v+1})),S:C(new Tone.Synth({oscillator:{type:'sawtooth'},envelope:{attack:.003,decay:d*.5,release:.3},volume:v-6}))};
+    case'poop':return{R:C(new Tone.MetalSynth({frequency:p,envelope:{attack:.001,decay:.8,release:1.5},harmonicity:0.5+ctrlHarm,modulationIndex:30,resonance:2000,volume:v+5})),S:C(new Tone.MonoSynth({oscillator:{type:'sawtooth'},envelope:{attack:.001,decay:.3,release:.8},volume:v-2}))};
   }
 }
 
 // ── Hanging shapes ──
-const anchorY=25;
-const hShapes=[];let hIdx=0;
-const hColors=['#9b1b30','#c04c2c','#d4a017','#2b5f8a','#6b8e23','#4a3f6b','#1d6f7a','#7a4b6e'];
-
-function createHangingShape(x,type){
-  const t=type||['circle','triangle','square','hexagon'][hIdx%4];hIdx++;
-  const color=hColors[hIdx%hColors.length];
-  const pitch=['C3','D3','E3','G3','A3','C4','D4','E4','G4','A4'][Math.floor(Math.random()*10)];
-  let body,size=25+Math.random()*20;
-  switch(t){
-    case'circle':body=Bodies.circle(x,anchorY+40,size,{density:.003,restitution:.4,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
-    case'triangle':body=Bodies.polygon(x,anchorY+40,3,size,{density:.003,restitution:.35,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
-    case'square':body=Bodies.rectangle(x,anchorY+40,size,size,{density:.004,restitution:.3,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
-    case'hexagon':body=Bodies.polygon(x,anchorY+40,6,size,{density:.003,restitution:.4,friction:.3,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:t});break;
-    case'poop':body=Bodies.circle(x,anchorY+40,size,{density:.003,restitution:.6,friction:.1,render:{visible:false},label:'poop'});break;
+const aY=25;const hShapes=[];let hI=0;const hCs=['#9b1b30','#c04c2c','#d4a017','#2b5f8a','#6b8e23','#4a3f6b','#1d6f7a','#7a4b6e'];
+function mkHang(x,t){
+  const tp=t||['circle','triangle','square','hexagon'][hI%4];hI++;
+  const cl=hCs[hI%hCs.length];const pC=['C3','D3','E3','G3','A3','C4','D4','E4','G4','A4'][Math.floor(Math.random()*10)];
+  let b,sz=25+Math.random()*20;
+  switch(tp){
+    case'circle':b=Bodies.circle(x,aY+40,sz,{density:.003,restitution:.4,friction:.3,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:tp});break;
+    case'triangle':b=Bodies.polygon(x,aY+40,3,sz,{density:.003,restitution:.35,friction:.3,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:tp});break;
+    case'square':b=Bodies.rectangle(x,aY+40,sz,sz,{density:.004,restitution:.3,friction:.3,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:tp});break;
+    case'hexagon':b=Bodies.polygon(x,aY+40,6,sz,{density:.003,restitution:.4,friction:.3,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.15)',lineWidth:1},label:tp});break;
+    case'poop':b=Bodies.circle(x,aY+40,sz,{density:.003,restitution:.6,friction:.1,render:{visible:false},label:'poop'});break;
   }
-  const str=Constraint.create({pointA:{x,y:anchorY},bodyB:body,pointB:{x:0,y:-size*.8},stiffness:.6,damping:.05,length:8,render:{strokeStyle:'rgba(255,255,255,.2)',lineWidth:.5}});
-  const voice=createVoice(t,pitch);
-  const obj={body,str,voice,type:t,pitch,color};
-  hShapes.push(obj);Composite.add(e.world,[body,str]);return obj;
+  const sC=Constraint.create({pointA:{x,y:aY},bodyB:b,pointB:{x:0,y:-sz*.8},stiffness:.6,damping:.05,length:8,render:{strokeStyle:'rgba(255,255,255,.2)',lineWidth:.5}});
+  const vc=createVoice(tp,pC);const o={body:b,str:sC,voice:vc,type:tp,pitch:pC,color:cl};
+  hShapes.push(o);Composite.add(e.world,[b,sC]);return o;
 }
-for(let i=0;i<7;i++)createHangingShape((i+.5)/7*w);
+for(let i=0;i<7;i++)mkHang((i+.5)/7*w);
 
-// ── Droppable shapes ──
-function dropShape(x,y,type){
-  const voices={circle:createVoice('circle'),triangle:createVoice('triangle'),square:createVoice('square'),hexagon:createVoice('hexagon'),poop:createVoice('poop')};
-  let body,size=18+Math.random()*16;
-  const color=hColors[Math.floor(Math.random()*hColors.length)];
+// ── Drop shapes ──
+function drop(x,y,type){
+  const vs={circle:createVoice('circle'),triangle:createVoice('triangle'),square:createVoice('square'),hexagon:createVoice('hexagon'),poop:createVoice('poop')};
+  let b,sz=18+Math.random()*16;const cl=hCs[Math.floor(Math.random()*hCs.length)];
   switch(type){
-    case'circle':body=Bodies.circle(x||.5*w,y||-30,size,{restitution:.6,density:.002,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
-    case'triangle':body=Bodies.polygon(x||.5*w,y||-30,3,size,{restitution:.5,density:.002,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
-    case'square':body=Bodies.rectangle(x||.5*w,y||-30,size,size,{restitution:.5,density:.003,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
-    case'hexagon':body=Bodies.polygon(x||.5*w,y||-30,6,size,{restitution:.6,density:.002,friction:.02,render:{fillStyle:color,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
-    case'poop':body=Bodies.circle(x||.5*w,y||-30,size*1.2,{restitution:.7,density:.001,friction:.1,render:{visible:false},label:'poop'});break;
+    case'circle':b=Bodies.circle(x||.5*w,y||-30,sz,{restitution:.6,density:.002,friction:.02,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
+    case'triangle':b=Bodies.polygon(x||.5*w,y||-30,3,sz,{restitution:.5,density:.002,friction:.02,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
+    case'square':b=Bodies.rectangle(x||.5*w,y||-30,sz,sz,{restitution:.5,density:.003,friction:.02,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
+    case'hexagon':b=Bodies.polygon(x||.5*w,y||-30,6,sz,{restitution:.6,density:.002,friction:.02,render:{fillStyle:cl,strokeStyle:'rgba(255,255,255,.2)',lineWidth:1},label:'drop'});break;
+    case'poop':b=Bodies.circle(x||.5*w,y||-30,sz*1.2,{restitution:.7,density:.001,friction:.1,render:{visible:false},label:'poop'});break;
   }
-  body._voice=voices[type];body._type=type;
-  Composite.add(e.world,body);
+  b._voice=vs[type];b._type=type;Composite.add(e.world,b);
 }
 
-// ── Collision sounds ──
-let lastHitMsgs={};
+// ── Collisions ──
+let lastH={};
 Events.on(e,'collisionStart',ev=>{ev.pairs.forEach(p=>{
   const a=p.bodyA,b=p.bodyB;
-  const isHS=l=>l==='circle'||l==='triangle'||l==='square'||l==='hexagon'||l==='poop';
-  const hS1=isHS(a.label),hS2=isHS(b.label);
-  // dropped shape (has _voice) hits hanging shape (no _voice)
-  if(a._voice&&hS2&&!b._voice){playHit(b,a);return;}
-  if(b._voice&&hS1&&!a._voice){playHit(a,b);return;}
-  if(hS1&&hS2&&a!==b)playHit(a,b);
+  const isH=l=>l==='circle'||l==='triangle'||l==='square'||l==='hexagon'||l==='poop';
+  if(a._voice&&isH(b.label)&&!b._voice){pHit(b,a);return;}
+  if(b._voice&&isH(a.label)&&!a._voice){pHit(a,b);return;}
+  if(isH(a.label)&&isH(b.label)&&a!==b)pHit(a,b);
 })});
-
-function playHit(hitBody,dropBody){
-  const hs=hShapes.find(s=>s.body===hitBody);
-  if(!hs)return;
-  const now=Date.now();const key=hs.body.id+'_'+Math.floor(now/300);
-  if(lastHitMsgs[key])return;lastHitMsgs[key]=true;
-  const v=dropBody||hs.body;
-  const speed=dropBody?Math.sqrt((hitBody.velocity.x-v.velocity.x)**2+(hitBody.velocity.y-v.velocity.y)**2)
-    :Math.sqrt(hitBody.velocity.x**2+hitBody.velocity.y**2);
-  const vel=Math.min(1,Math.max(.03,speed/15));
-  if(hs.voice.main)hs.voice.main.triggerAttackRelease(hs.pitch,`.5+${vel*2}`,undefined,.3+vel*.4);
-  if(hs.voice.ring)hs.voice.ring.triggerAttackRelease(hs.pitch,`1+${vel*2}`,undefined,.1+vel*.2);
-  Body.scale(hitBody,1.03,1.03);setTimeout(()=>Body.scale(hitBody,.97,.97),60);
+function pHit(hB,dB){
+  const hs=hShapes.find(s=>s.body===hB);if(!hs)return;
+  const k=hB.id+'_'+Math.floor(Date.now()/300);if(lastH[k])return;lastH[k]=true;
+  const v=dB||hB;const sp=dB?Math.sqrt((hB.velocity.x-v.velocity.x)**2+(hB.velocity.y-v.velocity.y)**2):Math.sqrt(hB.velocity.x**2+hB.velocity.y**2);
+  const vl=Math.min(1,Math.max(.03,sp/15));
+  if(hs.voice.R)hs.voice.R.triggerAttackRelease(hs.pitch,`.5+${vl*2}`,void 0,.3+vl*.4);
+  if(hs.voice.S)hs.voice.S.triggerAttackRelease(hs.pitch,`1+${vl*2}`,void 0,.1+vl*.2);
+  Body.scale(hB,1.03,1.03);setTimeout(()=>Body.scale(hB,.97,.97),60);
 }
 
-// ── Spawn buttons ──
-document.getElementById('btn-circle').onclick=()=>dropShape(null,null,'circle');
-document.getElementById('btn-triangle').onclick=()=>dropShape(null,null,'triangle');
-document.getElementById('btn-square').onclick=()=>dropShape(null,null,'square');
-document.getElementById('btn-hexagon').onclick=()=>dropShape(null,null,'hexagon');
-document.getElementById('btn-poop').onclick=()=>{for(let i=0;i<6;i++)setTimeout(()=>dropShape(w*Math.random(),-30-i*20,'poop'),i*100);};
+document.getElementById('btn-circle').onclick=()=>drop(null,null,'circle');
+document.getElementById('btn-triangle').onclick=()=>drop(null,null,'triangle');
+document.getElementById('btn-square').onclick=()=>drop(null,null,'square');
+document.getElementById('btn-hexagon').onclick=()=>drop(null,null,'hexagon');
+document.getElementById('btn-poop').onclick=()=>{for(let i=0;i<6;i++)setTimeout(()=>drop(w*Math.random(),-30-i*20,'poop'),i*100);};
+r.canvas.addEventListener('click',ev=>{drop(ev.clientX,ev.clientY-30,['circle','triangle','square','hexagon'][Math.floor(Math.random()*4)]);});
+document.body.onkeyup=ev=>{if(ev.key===' '||ev.code==='Space'){for(let i=0;i<10;i++)setTimeout(()=>drop(w*Math.random()+30*(Math.random()-.5),-30-i*15,'poop'),i*80);}};
 
-r.canvas.addEventListener('click',ev=>{
-  const types=['circle','triangle','square','hexagon'];
-  dropShape(ev.clientX,ev.clientY-30,types[Math.floor(Math.random()*4)]);
-});
-
-document.body.onkeyup=ev=>{
-  if(ev.key===' '||ev.code==='Space'){
-    for(let i=0;i<10;i++)setTimeout(()=>dropShape(w*Math.random()+30*(Math.random()-.5),-30-i*15,'poop'),i*80);
-  }
-};
-
-// ── Mouse drag ──
-const mouse=Mouse.create(r.canvas);
-Composite.add(e.world,MouseConstraint.create(e,{mouse,constraint:{stiffness:.1,render:{visible:false}}}));
-r.mouse=mouse;
-
-// ── Invisible walls ──
-Composite.add(e.world,[
-  Bodies.rectangle(w/2,-25,w,50,{isStatic:true,isSensor:true,render:{visible:false}}),
-  Bodies.rectangle(w/2,h+25,w,50,{isStatic:true,isSensor:true,render:{visible:false}}),
-  Bodies.rectangle(-25,h/2,50,h,{isStatic:true,isSensor:true,render:{visible:false}}),
-  Bodies.rectangle(w+25,h/2,50,h,{isStatic:true,isSensor:true,render:{visible:false}}),
-]);
-
+const ms=Mouse.create(r.canvas);
+Composite.add(e.world,MouseConstraint.create(e,{mouse:ms,constraint:{stiffness:.1,render:{visible:false}}}));
+r.mouse=ms;
+Composite.add(e.world,[Bodies.rectangle(w/2,-25,w,50,{isStatic:true,isSensor:true,render:{visible:false}}),Bodies.rectangle(w/2,h+25,w,50,{isStatic:true,isSensor:true,render:{visible:false}}),Bodies.rectangle(-25,h/2,50,h,{isStatic:true,isSensor:true,render:{visible:false}}),Bodies.rectangle(w+25,h/2,50,h,{isStatic:true,isSensor:true,render:{visible:false}})]);
 Runner.run(Runner.create(),e);Render.run(r);
-window.addEventListener('resize',()=>{r.canvas.width=window.innerWidth;r.canvas.height=window.innerHeight;});
+window.addEventListener('resize',()=>{r.canvas.width=window.innerWidth;r.canvas.height=window.innerHeight;oc.width=window.innerWidth;oc.height=window.innerHeight;});
 </script></body></html>
