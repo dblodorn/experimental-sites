@@ -125,6 +125,46 @@ document.getElementById('pitch-ctrl').onchange=e=>ctrlPitch=e.target.value;
 const mRev=new Tone.Reverb({decay:15,wet:.5}).toDestination();
 const mDel=new Tone.FeedbackDelay('8n',.12).connect(mRev);
 
+// ── Fart engine ──
+function createFart(){
+  const now=Tone.now();
+  // Low rumbling noise burst
+  const noise=new Tone.Noise('brown');
+  const noiseFilter=new Tone.Filter(150,'lowpass').toDestination();
+  const noiseEnv=new Tone.Gain(0);
+  noise.connect(noiseFilter);
+  noiseFilter.connect(noiseEnv);
+  noiseEnv.connect(mRev);
+  noise.start(now);
+  noiseEnv.gain.setValueAtTime(0,now);
+  noiseEnv.gain.linearRampToValueAtTime(0.35+Math.random()*0.15,now+0.05);
+  noiseEnv.gain.exponentialRampToValueAtTime(0.001,now+0.4+Math.random()*0.3);
+  noise.stop(now+0.7);
+  // Sub oscillator with pitch wobble (the "brrrr")
+  const sub=new Tone.Oscillator({frequency:80+Math.random()*40,type:'sawtooth'});
+  const subGain=new Tone.Gain(0);
+  sub.connect(subGain);
+  subGain.connect(mDel);
+  sub.start(now);
+  sub.frequency.setValueAtTime(80+Math.random()*40,now);
+  sub.frequency.exponentialRampToValueAtTime(30+Math.random()*20,now+0.3);
+  subGain.gain.setValueAtTime(0,now);
+  subGain.gain.linearRampToValueAtTime(0.25+Math.random()*0.15,now+0.04);
+  subGain.gain.exponentialRampToValueAtTime(0.001,now+0.5+Math.random()*0.3);
+  sub.stop(now+0.6);
+  // Little squeak at the start
+  const sq=new Tone.Oscillator({frequency:300+Math.random()*200,type:'sine'});
+  const sqGain=new Tone.Gain(0);
+  sq.connect(sqGain);
+  sqGain.connect(mDel);
+  sq.start(now);
+  sq.frequency.exponentialRampToValueAtTime(80+Math.random()*40,now+0.08);
+  sqGain.gain.setValueAtTime(0,now);
+  sqGain.gain.linearRampToValueAtTime(0.12+Math.random()*0.08,now+0.02);
+  sqGain.gain.exponentialRampToValueAtTime(0.001,now+0.1);
+  sq.stop(now+0.15);
+}
+
 function createVoice(shape,pitch){
   const p=pitch||ctrlPitch;const v=-8+(ctrlVol*12)-12;const h=1+ctrlHarm*4;const d=.2+ctrlDecay*3;
   const C=(s)=>{s.connect(mDel);return s;};
@@ -175,8 +215,8 @@ let lastH={};
 Events.on(e,'collisionStart',ev=>{ev.pairs.forEach(p=>{
   const a=p.bodyA,b=p.bodyB;
   const isH=l=>l==='circle'||l==='triangle'||l==='square'||l==='hexagon'||l==='poop';
-  if(a._voice&&isH(b.label)&&!b._voice){pHit(b,a);return;}
-  if(b._voice&&isH(a.label)&&!a._voice){pHit(a,b);return;}
+  if(a._voice&&isH(b.label)&&!b._voice){if(a._type==='poop')createFart();pHit(b,a);return;}
+  if(b._voice&&isH(a.label)&&!a._voice){if(b._type==='poop')createFart();pHit(a,b);return;}
   if(isH(a.label)&&isH(b.label)&&a!==b)pHit(a,b);
 })});
 function pHit(hB,dB){
@@ -193,9 +233,9 @@ document.getElementById('btn-circle').onclick=()=>drop(null,null,'circle');
 document.getElementById('btn-triangle').onclick=()=>drop(null,null,'triangle');
 document.getElementById('btn-square').onclick=()=>drop(null,null,'square');
 document.getElementById('btn-hexagon').onclick=()=>drop(null,null,'hexagon');
-document.getElementById('btn-poop').onclick=()=>{for(let i=0;i<6;i++)setTimeout(()=>drop(w*Math.random(),-30-i*20,'poop'),i*100);};
+document.getElementById('btn-poop').onclick=()=>{for(let i=0;i<6;i++)setTimeout(()=>{drop(w*Math.random(),-30-i*20,'poop');if(i%2===0)createFart();},i*120);};
 r.canvas.addEventListener('click',ev=>{drop(ev.clientX,ev.clientY-30,['circle','triangle','square','hexagon'][Math.floor(Math.random()*4)]);});
-document.body.onkeyup=ev=>{if(ev.key===' '||ev.code==='Space'){for(let i=0;i<10;i++)setTimeout(()=>drop(w*Math.random()+30*(Math.random()-.5),-30-i*15,'poop'),i*80);}};
+document.body.onkeyup=ev=>{if(ev.key===' '||ev.code==='Space'){for(let i=0;i<10;i++)setTimeout(()=>{drop(w*Math.random()+30*(Math.random()-.5),-30-i*15,'poop');if(i%3===0)createFart();},i*100);}};
 
 const ms=Mouse.create(r.canvas);
 Composite.add(e.world,MouseConstraint.create(e,{mouse:ms,constraint:{stiffness:.1,render:{visible:false}}}));
